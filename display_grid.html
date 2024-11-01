@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CCTV 圖片顯示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        html, body {
+            background: #000;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-size: 0;
+            line-height: 0;
+            position: fixed;
+            touch-action: none;
+        }
+        
+        .grid-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            width: 100vw;
+            height: 100vh;
+            gap: 1px;
+            background: #333;
+            font-size: 0;
+            line-height: 0;
+        }
+        
+        .grid-item {
+            background: #000;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+            font-size: 0;
+            line-height: 0;
+            touch-action: none;
+        }
+        
+        .grid-item img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+            margin: 0;
+            padding: 0;
+            border: none;
+            -webkit-user-select: none;
+            user-select: none;
+            pointer-events: none;
+        }
+        
+        .empty {
+            background: #000;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            font-size: 36px;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+        }
+        
+        .empty::after {
+            content: "無訊號";
+            display: block;
+            animation: textChange 2s steps(1) infinite;
+        }
+        
+        @keyframes textChange {
+            0% { content: "無訊號"; }
+            33% { content: "No Signal"; }
+            66% { content: "訊號中斷"; }
+        }
+
+        /* 手機版才縮小 */
+        @media (max-width: 768px) {
+            .grid-container {
+                width: 90vw;
+                height: 90vw;
+                margin: auto;
+            }
+            
+            .empty {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-container" id="gridContainer"></div>
+
+    <script>
+        // 禁止下拉刷新
+        document.body.addEventListener('touchmove', function(e) {
+            e.preventDefault();
+        }, { passive: false });
+
+        // 禁止雙擊縮放
+        document.addEventListener('dblclick', function(e) {
+            e.preventDefault();
+        });
+
+        async function loadStreams() {
+            try {
+                const response = await fetch('cctv_links.json');
+                const data = await response.json();
+                
+                const container = document.getElementById('gridContainer');
+                const oldDivs = Array.from(container.children);
+                
+                for (let i = 0; i < 9; i++) {
+                    let div;
+                    if (oldDivs[i]) {
+                        div = oldDivs[i];
+                    } else {
+                        div = document.createElement('div');
+                        div.className = 'grid-item';
+                        container.appendChild(div);
+                    }
+                    
+                    if (i < data.links.length && data.links[i]) {
+                        const newImg = document.createElement('img');
+                        const url = data.links[i];
+                        
+                        // 判斷是否為 CCTV 連結
+                        if (url.includes('cctv-ss01.thb.gov.tw')) {
+                            newImg.src = url + '/snapshot?t=' + new Date().getTime();
+                        } else {
+                            // 一般圖片連結
+                            newImg.src = url + '?t=' + new Date().getTime();
+                        }
+                        
+                        newImg.draggable = false;
+                        
+                        // 只有當圖片載入完成後才替換
+                        newImg.onload = function() {
+                            div.classList.remove('empty');
+                            const oldImg = div.querySelector('img');
+                            if (oldImg) {
+                                div.replaceChild(newImg, oldImg);
+                            } else {
+                                div.appendChild(newImg);
+                            }
+                        };
+                        
+                        // 如果新圖片載入失敗，顯示無訊號
+                        newImg.onerror = function() {
+                            div.innerHTML = '';
+                            div.classList.add('empty');
+                        };
+                    } else {
+                        div.innerHTML = '';
+                        div.classList.add('empty');
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading streams:', error);
+            }
+        }
+
+        loadStreams();
+        setInterval(loadStreams, 1000);
+    </script>
+</body>
+</html> 
