@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>CCTV 圖片顯示</title>
+    <!-- 
+    功能說明：
+    1. 九宮格顯示 CCTV 畫面
+    2. 自動分頁（每頁9個畫面）
+    3. 自動更新圖片（每1.5秒）
+    4. 自動切換頁面（每10秒）
+    5. 定期重載頁面（每30秒）
+    6. 支援鍵盤控制（左右方向鍵）
+    -->
     <style>
         * {
             margin: 0;
@@ -115,66 +124,227 @@
             e.preventDefault();
         });
 
+        // 在 script 標籤內的開頭添加分頁控制變數
+        let currentPage = 0;  // 目前頁面
+        const itemsPerPage = 9;  // 每頁顯示數量
+        
+        // 在 script 標籤內的開頭添加自動切換控制變數
+        let autoChangeInterval;
+        const autoChangeTime = 10000;  // 每 10 秒自動切換一次頁面
+        
         async function loadStreams() {
             try {
-                const response = await fetch('cctv_links.json');
+                const response = await fetch('cctv_links.json', {
+                    cache: 'no-store'
+                });
                 const data = await response.json();
+                const pages = data.pages || [];
+                
+                // 確保當前頁面在有效範圍內
+                if (currentPage >= pages.length) {
+                    currentPage = 0;
+                }
+                
+                // 直接使用當前頁面的連結陣列
+                const currentLinks = pages[currentPage] || [];
                 
                 const container = document.getElementById('gridContainer');
-                const oldDivs = Array.from(container.children);
                 
-                for (let i = 0; i < 9; i++) {
-                    let div;
-                    if (oldDivs[i]) {
-                        div = oldDivs[i];
-                    } else {
-                        div = document.createElement('div');
-                        div.className = 'grid-item';
+                // 如果是第一次載入，建立格子
+                if (container.children.length === 0) {
+                    for (let i = 0; i < itemsPerPage; i++) {
+                        const div = document.createElement('div');
+                        div.className = 'grid-item empty';
                         container.appendChild(div);
                     }
+                }
+                
+                // 更新所有格子
+                const divs = container.children;
+                for (let i = 0; i < divs.length; i++) {
+                    const div = divs[i];
                     
-                    if (i < data.links.length && data.links[i]) {
-                        const newImg = document.createElement('img');
-                        const url = data.links[i];
+                    // 清空現有內容
+                    div.innerHTML = '';
+                    
+                    if (i < currentLinks.length && currentLinks[i]) {
+                        // 有連結時才建立圖片元素
+                        const img = document.createElement('img');
+                        img.draggable = false;
+                        img.src = currentLinks[i];
+                        div.appendChild(img);
+                        div.classList.remove('empty');
                         
-                        // 判斷是否為 CCTV 連結
-                        if (url.includes('cctv-ss01.thb.gov.tw')) {
-                            newImg.src = url + '/snapshot?t=' + new Date().getTime();
-                        } else {
-                            // 一般圖片連結
-                            newImg.src = url + '?t=' + new Date().getTime();
-                        }
-                        
-                        newImg.draggable = false;
-                        
-                        // 只有當圖片載入完成後才替換
-                        newImg.onload = function() {
-                            div.classList.remove('empty');
-                            const oldImg = div.querySelector('img');
-                            if (oldImg) {
-                                div.replaceChild(newImg, oldImg);
-                            } else {
-                                div.appendChild(newImg);
-                            }
-                        };
-                        
-                        // 如果新圖片載入失敗，顯示無訊號
-                        newImg.onerror = function() {
-                            div.innerHTML = '';
+                        img.onerror = function() {
+                            div.innerHTML = '';  // 移除失敗的圖片
                             div.classList.add('empty');
                         };
                     } else {
-                        div.innerHTML = '';
+                        // 沒有連結時保持空的狀態
                         div.classList.add('empty');
                     }
                 }
+                
+                // 更新頁面指示器和時間
+                updatePageIndicator(currentPage + 1, pages.length);
+                
             } catch (error) {
-                console.error('Error loading streams:', error);
+                console.error('載入串流時發生錯誤:', error);
             }
         }
+        
+        // 修改頁面切換函數
+        async function changePage(delta) {
+            try {
+                const response = await fetch('cctv_links.json', {
+                    cache: 'no-store'
+                });
+                const data = await response.json();
+                const pages = data.pages || [];
+                
+                // 計算新的頁碼
+                let newPage = currentPage + delta;
+                
+                // 確保頁碼在有效範圍內
+                if (newPage < 0) {
+                    newPage = pages.length - 1;
+                } else if (newPage >= pages.length) {
+                    newPage = 0;
+                }
+                
+                // 更新頁碼並重新載入
+                currentPage = newPage;
+                await loadStreams();
+                
+            } catch (error) {
+                console.error('切換頁面時發生錯誤:', error);
+            }
+        }
+        
+        // 更新頁面指示器和時間
+        function updatePageIndicator(current, total) {
+            // 頁面指示器
+            const indicator = document.getElementById('pageIndicator');
+            if (!indicator) {
+                const div = document.createElement('div');
+                div.id = 'pageIndicator';
+                div.style.position = 'fixed';
+                div.style.top = '10px';
+                div.style.right = '10px';
+                div.style.transform = 'none';
+                div.style.background = 'rgba(0, 0, 0, 0.5)';
+                div.style.color = 'white';
+                div.style.padding = '5px 10px';
+                div.style.borderRadius = '3px';
+                div.style.zIndex = '1000';
+                div.style.fontSize = '14px';
+                div.style.fontFamily = 'Arial, sans-serif';
+                div.style.userSelect = 'none';
+                document.body.appendChild(div);
+            }
+            
+            // 時間顯示
+            const timeDisplay = document.getElementById('timeDisplay');
+            if (!timeDisplay) {
+                const div = document.createElement('div');
+                div.id = 'timeDisplay';
+                div.style.position = 'fixed';
+                div.style.top = '10px';
+                div.style.right = '70px';  // 放在頁碼左邊
+                div.style.background = 'rgba(0, 0, 0, 0.5)';
+                div.style.color = 'white';
+                div.style.padding = '5px 10px';
+                div.style.borderRadius = '3px';
+                div.style.zIndex = '1000';
+                div.style.fontSize = '14px';
+                div.style.fontFamily = 'Arial, sans-serif';
+                div.style.userSelect = 'none';
+                document.body.appendChild(div);
+            }
+            
+            // 更新頁碼和時間
+            document.getElementById('pageIndicator').textContent = `${current}/${total}`;
+            updateTime();
+        }
+        
+        // 更新時間的函數
+        function updateTime() {
+            const now = new Date();
+            // 格式化日期
+            const dateStr = now.toLocaleDateString('zh-TW', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            });
+            // 格式化時間
+            const timeStr = now.toLocaleTimeString('zh-TW', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            // 組合日期和時間
+            document.getElementById('timeDisplay').textContent = `${dateStr} ${timeStr}`;
+        }
+        
+        // 每秒更新時間
+        setInterval(updateTime, 1000);
+        
+        // 添加自動切換頁面函數
+        function startAutoChange() {
+            if (autoChangeInterval) {
+                clearInterval(autoChangeInterval);
+            }
+            autoChangeInterval = setInterval(async () => {
+                await changePage(1);  // 自切換到下一頁
+            }, autoChangeTime);
+        }
+        
+        // 修改鍵盤控制，手動切換時也重置自動切換計時器
+        document.addEventListener('keydown', async function(e) {
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                await changePage(-1);
+                startAutoChange();  // 重置自動切換計時器
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                await changePage(1);
+                startAutoChange();  // 重置自動切換計時器
+            }
+        });
 
+        // 初始載入頁面內容
         loadStreams();
-        setInterval(loadStreams, 1000);
+        
+        // 設定每 1.5 秒更新一次所有圖片
+        const updateInterval = setInterval(loadStreams, 1500);
+        
+        // 啟動自動切換頁面功能
+        startAutoChange();
+        
+        // 設置頁面自動重載的函數
+        function setupReload() {
+            setTimeout(function() {
+                console.log('重新載入頁面...');  // 輸出重載訊息
+                window.location.reload();  // 重新載入整個頁面
+            }, 30000);  // 每 30 秒執行一次
+        }
+        
+        // 啟動頁面重載計時器
+        setupReload();
+        
+        // 當頁面關閉時執行清理工作
+        window.onbeforeunload = function() {
+            clearInterval(updateInterval);  // 停止圖片更新計時器
+            clearInterval(autoChangeInterval);  // 停止自動換頁計時器
+            
+            // 清除所有圖片元素
+            const images = document.querySelectorAll('img');
+            images.forEach(img => {
+                img.src = '';  // 清除圖片來源
+                img.remove();  // 移除圖片元素
+            });
+        };
     </script>
 </body>
 </html> 

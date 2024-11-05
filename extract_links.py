@@ -1,3 +1,12 @@
+"""
+CCTV 圖片連結提取器
+功能：
+1. 提取網頁中的 CCTV 圖片連結
+2. 管理和編輯連結
+3. 自動分頁（每頁9個連結）
+4. 提供本地伺服器顯示監控畫面
+"""
+
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import requests
@@ -12,11 +21,53 @@ import http.server
 import socketserver
 import time
 
-class LinkExtractorGUI:
+# 全域變數
+PORT = 8000  # 伺服器埠號
+server_thread = None  # 伺服器執行緒
+
+def start_server():
+    """啟動 HTTP 伺服器"""
+    Handler = http.server.SimpleHTTPRequestHandler
+    
+    # 嘗試多個端口
+    for port in range(8000, 8010):
+        try:
+            with socketserver.TCPServer(("", port), Handler) as httpd:
+                global PORT
+                PORT = port
+                print(f"伺服器執行於 http://localhost:{PORT}")
+                httpd.serve_forever()
+                break
+        except OSError:
+            continue
+
+class LinkExtractorGUI:     
     def __init__(self, root):
         self.root = root
         self.root.title("CCTV 圖片連結提取器")
         self.root.geometry("800x600")
+        
+        # 啟動伺服器
+        global server_thread
+        if server_thread is None:
+            server_thread = threading.Thread(target=start_server, daemon=True)
+            server_thread.start()
+            # 等待伺服器啟動
+            time.sleep(1)
+            
+            # 確認伺服器是否啟動成功
+            max_retries = 5
+            for _ in range(max_retries):
+                try:
+                    requests.get(f'http://localhost:{PORT}', timeout=1)
+                    print("伺服器啟動成功")
+                    # 自動開啟監視器頁面
+                    webbrowser.open(f'http://localhost:{PORT}/display_grid.html')
+                    break
+                except:
+                    time.sleep(1)
+            else:
+                print("伺服器啟動失敗")
         
         # 創建主框架
         self.main_frame = ttk.Frame(root, padding="10")
@@ -45,7 +96,7 @@ class LinkExtractorGUI:
             mode='indeterminate'
         )
         
-        # 結果顯示區域
+        # 結顯示區域
         self.result_frame = ttk.LabelFrame(self.main_frame, text="提取結果", padding="5")
         self.result_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -111,18 +162,27 @@ class LinkExtractorGUI:
         # 綁定右鍵事件到所有可編輯元件
         self.url_entry.bind('<Button-3>', self.show_right_click_menu)
         self.result_text.bind('<Button-3>', self.show_right_click_menu)
+        
+        # 為編輯器中的輸入框也添加右鍵選單
+        def bind_right_click_to_entries(entries):
+            for entry in entries:
+                entry.bind('<Button-3>', self.show_right_click_menu)
     
     def show_right_click_menu(self, event):
-        self.right_click_menu.tk_popup(event.x_root, event.y_root)
+        try:
+            self.right_click_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.right_click_menu.grab_release()
     
     def right_click_menu_action(self, action):
         try:
+            focused = self.root.focus_get()
             if action == 'cut':
-                self.root.focus_get().event_generate('<<Cut>>')
+                focused.event_generate('<<Cut>>')
             elif action == 'copy':
-                self.root.focus_get().event_generate('<<Copy>>')
+                focused.event_generate('<<Copy>>')
             elif action == 'paste':
-                self.root.focus_get().event_generate('<<Paste>>')
+                focused.event_generate('<<Paste>>')
         except:
             pass
     
@@ -153,7 +213,7 @@ class LinkExtractorGUI:
             return f"錯誤: {str(e)}"
     
     def start_extraction(self):
-        # 空結果
+        # 清空結果
         self.result_text.delete(1.0, tk.END)
         url = self.url_entry.get().strip()
         
@@ -184,7 +244,7 @@ class LinkExtractorGUI:
         self.extract_button.config(state=tk.NORMAL)
         
         # 顯示結果
-        if isinstance(links, str):
+        if isinstance(links, str):  # 如果是錯誤訊息
             self.result_text.insert(tk.END, links)
             self.status_label.config(text="提取失敗")
             self.save_button.config(state=tk.DISABLED)
@@ -194,7 +254,7 @@ class LinkExtractorGUI:
                 for link in links:
                     self.result_text.insert(tk.END, link + "\n", "hyperlink")
                 self.status_label.config(text=f"成功提取 {len(links)} 個圖片連結")
-                self.save_button.config(state=tk.NORMAL)
+                self.save_button.config(state=tk.NORMAL)  # 啟用儲存按鈕
             else:
                 self.result_text.insert(tk.END, "沒有找到圖片連結")
                 self.status_label.config(text="未找到圖片連結")
@@ -207,7 +267,7 @@ class LinkExtractorGUI:
         filename = "cctv_links.json"
         current_data = {
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "links": []
+            "pages": []
         }
         
         try:
@@ -215,25 +275,45 @@ class LinkExtractorGUI:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     existing_data = json.load(f)
-                    # 保留現有的連結，但移除已滿的部分
-                    current_data["links"] = existing_data.get("links", [])[:8]  # 只保留前8個
+                    if "pages" in existing_data:
+                        current_data["pages"] = existing_data["pages"]
             except (FileNotFoundError, json.JSONDecodeError):
-                pass
+                current_data["pages"] = [[]]  # 如果檔案不存在，創建第一頁
             
-            # 添加新的連結（只添加第一個新連結）
+            # 取得所有現有連結
+            existing_links = set()
+            for page in current_data["pages"]:
+                existing_links.update(page)
+            
+            # 添加新的連結
             for link in self.current_links:
-                if link not in current_data["links"]:
-                    current_data["links"].insert(0, link)  # 在開頭插入新連結
-                    break  # 只插入一個新連結就停止
-            
-            # 確保只有9個連結
-            current_data["links"] = current_data["links"][:9]
+                if link not in existing_links:  # 如果是新連結
+                    # 找到最後一頁
+                    if not current_data["pages"]:
+                        current_data["pages"].append([])
+                    last_page = current_data["pages"][-1]
+                    
+                    # 如果最後一頁已滿，創建新頁面
+                    if len(last_page) >= 9:
+                        last_page = []
+                        current_data["pages"].append(last_page)
+                    
+                    # 添加連結到最後一頁
+                    last_page.append(link)
+                    existing_links.add(link)
             
             # 儲存更新後的資料
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(current_data, f, ensure_ascii=False, indent=2)
             
-            self.status_label.config(text=f"已更新 {filename}，共 {len(current_data['links'])} 個連結")
+            total_pages = len(current_data["pages"])
+            total_links = sum(len(page) for page in current_data["pages"])
+            self.status_label.config(text=f"已更新 {filename}，共 {total_links} 個連結，{total_pages} 頁")
+            
+            # 清空當前連結列表
+            self.current_links = []
+            self.save_button.config(state=tk.DISABLED)
+            
         except Exception as e:
             self.status_label.config(text=f"儲存失敗: {str(e)}")
     
@@ -265,114 +345,163 @@ class LinkExtractorGUI:
         main_frame = ttk.Frame(editor_window, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # 分頁控制框架
+        page_control_frame = ttk.Frame(main_frame)
+        page_control_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        current_page = [0]  # 使用列表來儲存當前頁碼，以便在函數內部修改
+        
+        def update_page_label():
+            page_label.config(text=f"第 {current_page[0] + 1} 頁")
+        
+        # 上一頁按鈕
+        prev_button = ttk.Button(
+            page_control_frame,
+            text="上一頁",
+            command=lambda: change_page(-1)
+        )
+        prev_button.pack(side=tk.LEFT)
+        
+        # 頁碼標籤
+        page_label = ttk.Label(page_control_frame, text="第 1 頁")
+        page_label.pack(side=tk.LEFT, padx=10)
+        
+        # 下一頁按鈕
+        next_button = ttk.Button(
+            page_control_frame,
+            text="下一頁",
+            command=lambda: change_page(1)
+        )
+        next_button.pack(side=tk.LEFT)
+        
         # 連結列表框架
         links_frame = ttk.LabelFrame(main_frame, text="連結列表", padding="5")
         links_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 建立連結列表
-        entries = []
+        # 儲存所有頁面的輸入框
+        all_entries = []
         
-        # 添加 load_links 函數定義
+        def create_page():
+            page_frame = ttk.Frame(links_frame)
+            page_entries = []
+            
+            for i in range(9):  # 每頁9個輸入框
+                row_frame = ttk.Frame(page_frame)
+                row_frame.pack(fill=tk.X, pady=2)
+                
+                # 連結輸入框
+                entry = ttk.Entry(row_frame)
+                entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                # 綁定右鍵選單
+                entry.bind('<Button-3>', self.show_right_click_menu)
+                page_entries.append(entry)
+                
+                # 測試按鈕
+                test_button = ttk.Button(
+                    row_frame,
+                    text="測試",
+                    command=lambda e=entry: test_link(e.get())
+                )
+                test_button.pack(side=tk.LEFT, padx=(5, 0))
+                
+                # 刪除按鈕
+                delete_button = ttk.Button(
+                    row_frame,
+                    text="刪除",
+                    command=lambda e=entry: e.delete(0, tk.END)
+                )
+                delete_button.pack(side=tk.LEFT, padx=(5, 0))
+            
+            return page_frame, page_entries
+        
+        def change_page(delta):
+            # 隱藏當前頁面
+            if all_entries:
+                all_entries[current_page[0]][0].pack_forget()
+            
+            # 計算新頁碼
+            current_page[0] = (current_page[0] + delta) % len(all_entries)
+            if current_page[0] < 0:
+                current_page[0] = len(all_entries) - 1
+            
+            # 顯示新頁面
+            if all_entries:
+                all_entries[current_page[0]][0].pack(fill=tk.BOTH, expand=True)
+            update_page_label()
+        
         def load_links():
             try:
                 with open("cctv_links.json", 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return data.get("links", [])
+                    return data.get("pages", [])
             except:
-                return []
+                return [[]]
         
-        # 創建共用的右鍵選單
-        entry_menu = tk.Menu(editor_window, tearoff=0)
-        entry_menu.add_command(label="剪下", command=lambda: editor_window.focus_get().event_generate('<<Cut>>'))
-        entry_menu.add_command(label="複製", command=lambda: editor_window.focus_get().event_generate('<<Copy>>'))
-        entry_menu.add_command(label="貼上", command=lambda: editor_window.focus_get().event_generate('<<Paste>>'))
+        # 載入現有連結並創建頁面
+        pages = load_links()
+        for page in pages:
+            page_frame, page_entries = create_page()
+            for entry, link in zip(page_entries, page + [''] * (9 - len(page))):
+                entry.insert(0, link)
+            all_entries.append((page_frame, page_entries))
         
-        def show_entry_menu(event):
-            widget = event.widget
-            entry_menu.tk_popup(event.x_root, event.y_root)
+        # 如果沒有頁面，創建一個空頁面
+        if not all_entries:
+            page_frame, page_entries = create_page()
+            all_entries.append((page_frame, page_entries))
         
-        def create_link_row(link, index):
-            row_frame = ttk.Frame(links_frame)
-            row_frame.pack(fill=tk.X, pady=2)
-            
-            # 連結輸入框
-            entry = ttk.Entry(row_frame)
-            entry.insert(0, link)
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            entries.append(entry)
-            
-            # 綁定右鍵選單
-            entry.bind('<Button-3>', show_entry_menu)
-            
-            # 測試按鈕
-            test_button = ttk.Button(
-                row_frame,
-                text="測試",
-                command=lambda: test_link(entry.get())
-            )
-            test_button.pack(side=tk.LEFT, padx=(5, 0))
-            
-            # 刪除按鈕
-            def delete_row():
-                row_frame.destroy()
-                entries.remove(entry)
-            
-            delete_button = ttk.Button(
-                row_frame,
-                text="刪除",
-                command=delete_row
-            )
-            delete_button.pack(side=tk.LEFT, padx=(5, 0))
+        # 顯示第一頁
+        all_entries[0][0].pack(fill=tk.BOTH, expand=True)
         
         def test_link(url):
-            try:
+            if url.strip():
                 webbrowser.open(url)
-            except Exception as e:
-                messagebox.showerror("錯誤", f"無法開啟連結: {str(e)}")
         
         def save_changes():
             try:
-                # 收集所有未被刪除的連結
-                new_links = []
-                for entry in entries:
-                    link = entry.get().strip()
-                    if link:  # 如果連結不是空的
-                        new_links.append(link)
+                # 收集所有頁面的連結
+                all_links = []
+                for _, page_entries in all_entries:
+                    page_links = []
+                    for entry in page_entries:
+                        link = entry.get().strip()
+                        if link:  # 如果連結不是空的
+                            page_links.append(link)
+                    if page_links:  # 如果這一頁有連結
+                        all_links.append(page_links)
                 
                 # 儲存到 JSON
                 data = {
                     "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "links": new_links
+                    "pages": all_links
                 }
                 
                 with open("cctv_links.json", 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                 
-                messagebox.showinfo("成功", "變更已儲存")
+                messagebox.showinfo("成功", f"已儲存 {sum(len(page) for page in all_links)} 個連結，共 {len(all_links)} 頁")
                 editor_window.destroy()
                 
             except Exception as e:
                 messagebox.showerror("錯誤", str(e))
         
-        def add_new_row():
-            create_link_row("", len(entries))
-        
-        # 載入現有連結
-        links = load_links()
-        for i, link in enumerate(links):
-            create_link_row(link, i)
-        
         # 按鈕框架
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
         
-        # 新增按鈕
-        add_button = ttk.Button(
+        # 新增頁面按鈕
+        add_page_button = ttk.Button(
             button_frame,
-            text="新增連結",
-            command=add_new_row
+            text="新增頁面",
+            command=lambda: add_new_page()
         )
-        add_button.pack(side=tk.LEFT)
+        add_page_button.pack(side=tk.LEFT)
+        
+        def add_new_page():
+            page_frame, page_entries = create_page()
+            all_entries.append((page_frame, page_entries))
+            current_page[0] = len(all_entries) - 1
+            change_page(0)
         
         # 儲存按鈕
         save_button = ttk.Button(
@@ -399,7 +528,7 @@ class LinkExtractorGUI:
                     print(f"Server running at http://localhost:{PORT}")
                     httpd.serve_forever()
             
-            # 在新執行緒中啟動伺服器
+            # 在新行緒中啟動伺服器
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
             

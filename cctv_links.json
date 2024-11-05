@@ -1,9 +1,20 @@
 {
-  "timestamp": "20241102_073145",
-  "links": [
-    "https://cctv-ss01.thb.gov.tw/T1-70K+850",
-    "https://cctv-ss01.thb.gov.tw/T1-65K+600",
-    "https://cctv-ss01.thb.gov.tw/T1-65K+500",
-    "https://cctv-ss01.thb.gov.tw/T1-63K+700"
+  "timestamp": "20241103_113930",
+  "pages": [
+    [
+      "https://cctv-ss01.thb.gov.tw/T1-65K+500",
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18370",
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18290",
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18460",
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18601",
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18604",
+      "https://cctvtraffic.tycg.gov.tw/camera010",
+      "https://cctv-ss01.thb.gov.tw/T1-70K+850",
+      "https://cctv-ss01.thb.gov.tw/T1-65K+600"
+    ],
+    [
+      "https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=18930",
+      "https://cctv-ss04.thb.gov.tw/T14A-006K+950"
+    ]
   ]
 }
