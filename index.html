@@ -270,6 +270,8 @@
         // 更新時間的函數
         function updateTime() {
             const now = new Date();
+            // 格式化星期
+            const weekDay = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
             // 格式化日期
             const dateStr = now.toLocaleDateString('zh-TW', {
                 year: 'numeric',
@@ -283,8 +285,9 @@
                 minute: '2-digit',
                 second: '2-digit'
             });
-            // 組合日期和時間
-            document.getElementById('timeDisplay').textContent = `${dateStr} ${timeStr}`;
+            // 組合日期、星期和時間
+            document.getElementById('timeDisplay').textContent = 
+                `${dateStr} (${weekDay}) ${timeStr}`;
         }
         
         // 每秒更新時間
@@ -316,18 +319,15 @@
         // 初始載入頁面內容
         loadStreams();
         
-        // 設定每 1.5 秒更新一次所有圖片
-        const updateInterval = setInterval(loadStreams, 1500);
-        
-        // 啟動自動切換頁面功能
-        startAutoChange();
+        // 設定每 3 秒更新一次所有圖片
+        const updateInterval = setInterval(loadStreams, 3000);
         
         // 設置頁面自動重載的函數
         function setupReload() {
             setTimeout(function() {
-                console.log('重新載入頁面...');  // 輸出重載訊息
-                window.location.reload();  // 重新載入整個頁面
-            }, 30000);  // 每 30 秒執行一次
+                console.log('重新載入頁面...');
+                window.location.reload();
+            }, 60000);  // 每 60 秒執行一次
         }
         
         // 啟動頁面重載計時器
@@ -336,7 +336,6 @@
         // 當頁面關閉時執行清理工作
         window.onbeforeunload = function() {
             clearInterval(updateInterval);  // 停止圖片更新計時器
-            clearInterval(autoChangeInterval);  // 停止自動換頁計時器
             
             // 清除所有圖片元素
             const images = document.querySelectorAll('img');

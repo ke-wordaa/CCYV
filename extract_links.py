@@ -20,6 +20,7 @@ import threading
 import http.server
 import socketserver
 import time
+import sys
 
 # 全域變數
 PORT = 8000  # 伺服器埠號
@@ -27,18 +28,42 @@ server_thread = None  # 伺服器執行緒
 
 def start_server():
     """啟動 HTTP 伺服器"""
-    Handler = http.server.SimpleHTTPRequestHandler
+    class CustomHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            # 取得執行檔或腳本所在的目錄
+            if getattr(sys, 'frozen', False):
+                # 如果是執行檔
+                application_path = os.path.dirname(sys.executable)
+            else:
+                # 如果是腳本
+                application_path = os.path.dirname(os.path.abspath(__file__))
+            
+            # 切換到正確的目錄
+            os.chdir(application_path)
+            
+            # 設定根目錄
+            super().__init__(*args, directory=application_path, **kwargs)
+        
+        def do_GET(self):
+            # 如果請求根路徑，自動導向到 index.html
+            if self.path == '/':
+                self.path = '/index.html'
+            return super().do_GET()
     
     # 嘗試多個端口
     for port in range(8000, 8010):
         try:
-            with socketserver.TCPServer(("", port), Handler) as httpd:
+            os.chdir(os.path.dirname(os.path.abspath(__file__)))  # 確保在正確目錄
+            with socketserver.TCPServer(("", port), CustomHandler) as httpd:
                 global PORT
                 PORT = port
                 print(f"伺服器執行於 http://localhost:{PORT}")
+                print(f"根目錄: {os.getcwd()}")
+                print(f"檔案列表: {os.listdir()}")
                 httpd.serve_forever()
                 break
-        except OSError:
+        except OSError as e:
+            print(f"端口 {port} 錯誤: {e}")
             continue
 
 class LinkExtractorGUI:     
@@ -62,9 +87,10 @@ class LinkExtractorGUI:
                     requests.get(f'http://localhost:{PORT}', timeout=1)
                     print("伺服器啟動成功")
                     # 自動開啟監視器頁面
-                    webbrowser.open(f'http://localhost:{PORT}/display_grid.html')
+                    webbrowser.open(f'http://localhost:{PORT}')
                     break
-                except:
+                except Exception as e:
+                    print(f"等待伺服器啟動: {e}")
                     time.sleep(1)
             else:
                 print("伺服器啟動失敗")
@@ -144,7 +170,7 @@ class LinkExtractorGUI:
         )
         self.edit_json_button.pack(side=tk.LEFT, padx=(5, 0))
         
-        # 添加開啟 HTML 按鈕
+        # 添加開啟 HTML 鈕
         self.open_html_button = ttk.Button(
             self.url_frame, 
             text="開啟監視器",
